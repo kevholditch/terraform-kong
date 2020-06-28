@@ -1,10 +1,11 @@
 package kong
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/kevholditch/gokong"
+	"github.com/hbagdi/go-kong/kong"
 )
 
 func resourceKongCertificate() *schema.Resource {
@@ -36,15 +37,20 @@ func resourceKongCertificate() *schema.Resource {
 
 func resourceKongCertificateCreate(d *schema.ResourceData, meta interface{}) error {
 
-	certificateRequest := createKongCertificateRequestFromResourceData(d)
+	certificateRequest := &kong.Certificate{
+		Cert: kong.String(d.Get("certificate").(string)),
+		Key:  kong.String(d.Get("private_key").(string)),
+	}
 
-	certificate, err := meta.(*config).adminClient.Certificates().Create(certificateRequest)
+	client := meta.(*config).adminClient.Certificates
+
+	certificate, err := client.Create(context.Background(), certificateRequest)
 
 	if err != nil {
 		return fmt.Errorf("failed to create kong certificate: %v error: %v", certificateRequest, err)
 	}
 
-	d.SetId(*certificate.Id)
+	d.SetId(*certificate.ID)
 
 	return resourceKongCertificateRead(d, meta)
 }
@@ -52,9 +58,15 @@ func resourceKongCertificateCreate(d *schema.ResourceData, meta interface{}) err
 func resourceKongCertificateUpdate(d *schema.ResourceData, meta interface{}) error {
 	d.Partial(false)
 
-	certificateRequest := createKongCertificateRequestFromResourceData(d)
+	certificateRequest := &kong.Certificate{
+		ID:   kong.String(d.Id()),
+		Cert: kong.String(d.Get("certificate").(string)),
+		Key:  kong.String(d.Get("private_key").(string)),
+	}
 
-	_, err := meta.(*config).adminClient.Certificates().UpdateById(d.Id(), certificateRequest)
+	client := meta.(*config).adminClient.Certificates
+
+	_, err := client.Update(context.Background(), certificateRequest)
 
 	if err != nil {
 		return fmt.Errorf("error updating kong certificate: %s", err)
@@ -65,9 +77,11 @@ func resourceKongCertificateUpdate(d *schema.ResourceData, meta interface{}) err
 
 func resourceKongCertificateRead(d *schema.ResourceData, meta interface{}) error {
 
-	certificate, err := meta.(*config).adminClient.Certificates().GetById(d.Id())
+	client := meta.(*config).adminClient.Certificates
 
-	if err != nil {
+	certificate, err := client.Get(context.Background(), kong.String(d.Id()))
+
+	if !kong.IsNotFoundErr(err) && err != nil {
 		return fmt.Errorf("could not find kong certificate: %v", err)
 	}
 
@@ -75,11 +89,11 @@ func resourceKongCertificateRead(d *schema.ResourceData, meta interface{}) error
 		d.SetId("")
 	} else {
 		if certificate.Cert != nil {
-			d.Set("certificate", certificate.Cert)
+			d.Set("certificate", &certificate.Cert)
 		}
 
 		if certificate.Key != nil {
-			d.Set("private_key", certificate.Key)
+			d.Set("private_key", &certificate.Key)
 		}
 	}
 
@@ -88,21 +102,13 @@ func resourceKongCertificateRead(d *schema.ResourceData, meta interface{}) error
 
 func resourceKongCertificateDelete(d *schema.ResourceData, meta interface{}) error {
 
-	err := meta.(*config).adminClient.Certificates().DeleteById(d.Id())
+	client := meta.(*config).adminClient.Certificates
+
+	err := client.Delete(context.Background(), kong.String(d.Id()))
 
 	if err != nil {
 		return fmt.Errorf("could not delete kong certificate: %v", err)
 	}
 
 	return nil
-}
-
-func createKongCertificateRequestFromResourceData(d *schema.ResourceData) *gokong.CertificateRequest {
-
-	certificateRequest := &gokong.CertificateRequest{}
-
-	certificateRequest.Cert = readStringPtrFromResource(d, "certificate")
-	certificateRequest.Key = readStringPtrFromResource(d, "private_key")
-
-	return certificateRequest
 }
